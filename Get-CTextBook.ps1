@@ -60,9 +60,10 @@ Begin
 	if($cmd.Count -eq 1) { Write-DisplayHelp -Name "$(Get-RootScriptPath)" @cmd }
 	
 	
-	$installedPackages = Get-Package | Out-String
-	$htmlAgilityPackInstalled = $installedPackages -match 'HtmlAgilityPack'
-
+	$packageName = "HtmlAgilityPack"
+	$packagePath = "$env:USERPROFILE\.nuget\packages"
+	$htmlAgilityPackInstalled = Get-ChildItem -Path $packagePath -Recurse -Filter $packageName -Directory
+	
 	if (-Not $htmlAgilityPackInstalled) {
 		Write-Host "HtmlAgilityPack does not exist"
 
@@ -76,11 +77,38 @@ Begin
 		}
 	}
 
-	$htmlAgilityPackDll = Get-ChildItem -Path $nugetPackageDir -Filter "HtmlAgilityPack.dll" -Recurse | Select-Object -First 1
+	$htmlAgilityPackDll = Get-ChildItem -Path $packagePath -Filter "HtmlAgilityPack.dll" -Recurse | Select-Object -First 1
+	
 	if ($htmlAgilityPackDll) {
 		Add-Type -Path $htmlAgilityPackDll.FullName
 	} else {
 		Write-Host "HtmlAgilityPack could not be loaded."
+		exit
+	}
+	
+	
+	$packageName = "Microsoft.International.Converters.PinYinConverter"
+	$htmlAgilityPackInstalled = Get-ChildItem -Path $packagePath -Recurse -Filter $packageName -Directory
+	
+	if (-Not $htmlAgilityPackInstalled) {
+		Write-Host "Microsoft.International.Converters.PinYinConverter does not exist"
+
+		if ((Get-PackageSource).Name -contains 'NuGet') {
+			Write-Host "Installing Microsoft.International.Converters.PinYinConverter..."
+
+			nuget install "Microsoft.International.Converters.PinYinConverter"
+		} else {
+			Write-Host "NuGet is required to install Microsoft.International.Converters.PinYinConverter, but it is not installed."
+			exit
+		}
+	}
+
+	$htmlAgilityPackDll = Get-ChildItem -Path $packagePath -Filter "ChnCharInfo.dll" -Recurse | Select-Object -First 1
+	
+	if ($htmlAgilityPackDll) {
+		Add-Type -Path $htmlAgilityPackDll.FullName
+	} else {
+		Write-Host "Microsoft.International.Converters.PinYinConverter could not be loaded."
 		exit
 	}
 }
@@ -89,10 +117,7 @@ Process
 {
 	try
 	{
-		if(-Not (Assert-PathQueueParameter))
-		{
-			Write-DisplayHelp -Name "$(Get-RootScriptPath)" -HelpDetail
-		}
+		$isDebug = Assert-Debug
 		
 		function Get-ChapterUrls {
 			param(
@@ -184,17 +209,24 @@ Process
 
 
 			$pinyinOutput = foreach ($url in $result.Keys) { 
+				#Write-Host $url
+				#Write-Host $response
+				
 				$chineseText = $result[$url]
-				$url = "https://translate.google.com/#view=home&op=translate&sl=zh-CN&tl=en&text=$chineseText"
-				$response = Invoke-WebRequest -Uri $url
-				$doc = New-Object HtmlAgilityPack.HtmlDocument
-				$doc.LoadHtml($response)
+				foreach($c in $chineseText.Trim().ToCharArray()) {
+					try {
+						$chineseChar = New-Object Microsoft.International.Converters.PinYinConverter.chineseChar($c)
+						$shortR += $chineseChar.Pinyins[0].Substring(0, 1).ToLower()
+						$allR += $chineseChar.Pinyins[0].Substring(0, $chineseChar.Pinyins[0].Length - 1).ToLower()
+					}
+					catch {
+						$shortR += $c
+						$allR += $c
+					}
+				}
 
-				$node = $doc.DocumentNode.SelectSingleNode("//span[@jsname='toZopb']")
-
-				$pinyinText = $node.InnerText			
-
-				Write-Output $pinyinText 
+				Write-Host $allR
+				Write-Output $allR 
 			}
 			
 		}
