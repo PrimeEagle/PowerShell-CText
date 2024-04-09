@@ -87,28 +87,28 @@ Begin
 	}
 	
 	
-	$packageName = "Microsoft.International.Converters.PinYinConverter"
-	$htmlAgilityPackInstalled = Get-ChildItem -Path $packagePath -Recurse -Filter $packageName -Directory
+	$packageName = "Pinyin4net"
+	$pinyinInstalled = Get-ChildItem -Path $packagePath -Recurse -Filter $packageName -Directory
 	
-	if (-Not $htmlAgilityPackInstalled) {
-		Write-Host "Microsoft.International.Converters.PinYinConverter does not exist"
+	if (-Not $pinyinInstalled) {
+		Write-Host "$packageName does not exist"
 
 		if ((Get-PackageSource).Name -contains 'NuGet') {
-			Write-Host "Installing Microsoft.International.Converters.PinYinConverter..."
+			Write-Host "Installing $packageName..."
 
-			nuget install "Microsoft.International.Converters.PinYinConverter"
+			nuget install "$packageName"
 		} else {
-			Write-Host "NuGet is required to install Microsoft.International.Converters.PinYinConverter, but it is not installed."
+			Write-Host "NuGet is required to install $packageName, but it is not installed."
 			exit
 		}
 	}
 
-	$htmlAgilityPackDll = Get-ChildItem -Path $packagePath -Filter "ChnCharInfo.dll" -Recurse | Select-Object -First 1
+	$pinyinDll = Get-ChildItem -Path $packagePath -Filter "$packageName.dll" -Recurse | Select-Object -First 1
 	
-	if ($htmlAgilityPackDll) {
-		Add-Type -Path $htmlAgilityPackDll.FullName
+	if ($pinyinDll) {
+		Add-Type -Path $pinyinDll.FullName
 	} else {
-		Write-Host "Microsoft.International.Converters.PinYinConverter could not be loaded."
+		Write-Host "$packageName could not be loaded."
 		exit
 	}
 }
@@ -191,7 +191,9 @@ Process
 		$baseUrl = "https://ctext.org"
 		$bookUrl = "$baseUrl/$BookTag"
 		$bookTopLevel = Get-TopLevelFolder $bookUrl
-
+		$hanziOutput = ""
+		$pinyin = ""
+		
 		if($IncludeChineseHanzi) {
 			$chapterUrls = [ordered]@{}
 			Get-ChapterUrls -url "$bookUrl/zh" -chapterUrls $chapterUrls
@@ -204,31 +206,21 @@ Process
 		if($IncludeChinesePinyin) {
 			$chapterUrls = [ordered]@{}
 			Get-ChapterUrls -url "$bookUrl/zh" -chapterUrls $chapterUrls
-			$result = Get-ChapterTexts  $chapterUrls "ctext"
-
-
+			$result = Get-ChapterTexts $chapterUrls "ctext"
 
 			$pinyinOutput = foreach ($url in $result.Keys) { 
-				#Write-Host $url
-				#Write-Host $response
+				$outputFormat = New-Object pinyin4net.Format.HanyuPinyinOutputFormat
+				$outputFormat.ToneType = [pinyin4net.Format.HanyuPinyinToneType]::WITH_TONE_MARK
+				$outputFormat.VCharType = [pinyin4net.Format.HanyuPinyinVCharType]::WITH_U_UNICODE
 				
-				$chineseText = $result[$url]
-				foreach($c in $chineseText.Trim().ToCharArray()) {
-					try {
-						$chineseChar = New-Object Microsoft.International.Converters.PinYinConverter.chineseChar($c)
-						$shortR += $chineseChar.Pinyins[0].Substring(0, 1).ToLower()
-						$allR += $chineseChar.Pinyins[0].Substring(0, $chineseChar.Pinyins[0].Length - 1).ToLower()
-					}
-					catch {
-						$shortR += $c
-						$allR += $c
-					}
-				}
+				foreach($ch in $result[$url].ToCharArray())
+				{
+					$pinyin = [pinyin4net.PinyinHelper]::ToHanyuPinyinStringArray($ch, $outputFormat)
 
-				Write-Host $allR
-				Write-Output $allR 
+					#Write-Host $pinyin
+					Write-Output $pinyin 
+				}
 			}
-			
 		}
 		
 		if($IncludeEnglishCText) {
@@ -237,7 +229,6 @@ Process
 			$result = Get-ChapterTexts  $chapterUrls
 
 			$englishCTextOutput = foreach ($url in $result.Keys) { Write-Output $result[$url] }
-			
 		}
 		
 		if($IncludeEnglishDeepL) {
@@ -246,7 +237,6 @@ Process
 			$result = Get-ChapterTexts  $chapterUrls "ctext"
 
 			$englishDeepLOutput = foreach ($url in $result.Keys) { Write-Output $result[$url] }
-			
 		}
 		
 		($hanziOutput + $pinyinOutput + $englishCTextOutput + $englishDeepLOutput) | Out-File $OutputFile
