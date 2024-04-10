@@ -11,8 +11,17 @@
 	.OUTPUTS
 	None.
 
+	.PARAMETER BookTag
+	The identifier tag for the book on ctext.org.
+	
+	.PARAMETER Display
+	Whetehr to display the extracted text in the console.
+	
+	.PARAMETER OutputFile
+	The output file to write the book to.
+	
 	.EXAMPLE
-	PS> .\Get-CTextBook.ps1 -Path "D:\temp\"
+	PS> .\Get-CTextBook.ps1 -BookTag zhuangzi -OutputFile "D:\book.txt"
 #>
 
 <#
@@ -35,13 +44,9 @@ using module Varan.PowerShell.PerformanceTimer
 using module Varan.PowerShell.Summary
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Low')]
-param (	[Parameter()]
-			[string]		$BookTag,
-			[string]		$OutputFile,
-			[switch]		$IncludeChineseHanzi,
-			[switch]		$IncludeChinesePinyin,
-			[switch]		$IncludeEnglishCText,
-			[switch]		$IncludeEnglishDeepL
+param (	[Parameter(Mandatory)] 				[string]$BookTag,
+		[Parameter()]						[string]$OutputFile,
+		[Parameter()]						[switch]$Display
 	  )
 DynamicParam { Build-BaseParameters -IncludeMusicPathQueues }
 
@@ -59,58 +64,7 @@ Begin
 	if($cmd.Count -gt 1) { Write-DisplayHelp -Name "$(Get-RootScriptPath)" -HelpDetail }
 	if($cmd.Count -eq 1) { Write-DisplayHelp -Name "$(Get-RootScriptPath)" @cmd }
 	
-	
-	$packageName = "HtmlAgilityPack"
-	$packagePath = "$env:USERPROFILE\.nuget\packages"
-	$htmlAgilityPackInstalled = Get-ChildItem -Path $packagePath -Recurse -Filter $packageName -Directory
-	
-	if (-Not $htmlAgilityPackInstalled) {
-		Write-Host "HtmlAgilityPack does not exist"
-
-		if ((Get-PackageSource).Name -contains 'NuGet') {
-			Write-Host "Installing HtmlAgilityPack..."
-
-			nuget install "HtmlAgilityPack"
-		} else {
-			Write-Host "NuGet is required to install HtmlAgilityPack, but it is not installed."
-			exit
-		}
-	}
-
-	$htmlAgilityPackDll = Get-ChildItem -Path $packagePath -Filter "HtmlAgilityPack.dll" -Recurse | Select-Object -First 1
-	
-	if ($htmlAgilityPackDll) {
-		Add-Type -Path $htmlAgilityPackDll.FullName
-	} else {
-		Write-Host "HtmlAgilityPack could not be loaded."
-		exit
-	}
-	
-	
-	$packageName = "Pinyin4net"
-	$pinyinInstalled = Get-ChildItem -Path $packagePath -Recurse -Filter $packageName -Directory
-	
-	if (-Not $pinyinInstalled) {
-		Write-Host "$packageName does not exist"
-
-		if ((Get-PackageSource).Name -contains 'NuGet') {
-			Write-Host "Installing $packageName..."
-
-			nuget install "$packageName"
-		} else {
-			Write-Host "NuGet is required to install $packageName, but it is not installed."
-			exit
-		}
-	}
-
-	$pinyinDll = Get-ChildItem -Path $packagePath -Filter "$packageName.dll" -Recurse | Select-Object -First 1
-	
-	if ($pinyinDll) {
-		Add-Type -Path $pinyinDll.FullName
-	} else {
-		Write-Host "$packageName could not be loaded."
-		exit
-	}
+	Add-NuGetType -PackageName "HtmlAgilityPack"
 }
 
 Process
@@ -152,22 +106,25 @@ Process
 		}
 		
 		function Get-ChapterTexts {
-			 param(
+			param(
 				[System.Collections.Specialized.OrderedDictionary]$chapterUrls,
 				[string] $textClass
 			)
 			
 			$tempChapterUrls = [ordered]@{}
-			foreach($cu in $chapterUrls.Keys) {
+			foreach ($cu in $chapterUrls.Keys) {
 				$result = Invoke-WebRequest -Uri $cu -AllowInsecureRedirect
 				$htmlDoc = New-Object HtmlAgilityPack.HtmlDocument
 				$htmlDoc.LoadHtml($result.Content)
-				$tempChapterUrls[$cu] = ""
+				$tempChapterUrls[$cu] = @()
 				
-				$tdNodes = $htmlDoc.DocumentNode.SelectNodes("//td[@class='$textClass']")
-				
-				foreach($td in $tdNodes) {
-					$tempChapterUrls[$cu] += $td.InnerText
+				$tdNodes = $htmlDoc.DocumentNode.SelectNodes("//td[contains(concat(' ', normalize-space(@class), ' '), ' $textClass ')]")
+
+				foreach ($td in $tdNodes) {
+					$tempLine = ($td.InnerText -replace '\s+', ' ').Trim()
+					if (-Not [string]::IsNullOrWhiteSpace($tempLine)) {
+						$tempChapterUrls[$cu] += $tempLine
+					}
 				}
 			}
 			
@@ -191,55 +148,30 @@ Process
 		$baseUrl = "https://ctext.org"
 		$bookUrl = "$baseUrl/$BookTag"
 		$bookTopLevel = Get-TopLevelFolder $bookUrl
-		$hanziOutput = ""
-		$pinyin = ""
+		$chapterUrls = [ordered]@{}
+		Get-ChapterUrls -url "$bookUrl/zh" -chapterUrls $chapterUrls
+		$text = Get-ChapterTexts  $chapterUrls "ctext"
+		$result = @()
 		
-		if($IncludeChineseHanzi) {
-			$chapterUrls = [ordered]@{}
-			Get-ChapterUrls -url "$bookUrl/zh" -chapterUrls $chapterUrls
-			$result = Get-ChapterTexts  $chapterUrls "ctext"
-
-			$hanziOutput = foreach ($url in $result.Keys) { Write-Output $result[$url] }
-			
+		if(Test-Path -Path $OutputFile) {
+			Remove-Item $OutputFile -Force
 		}
 		
-		if($IncludeChinesePinyin) {
-			$chapterUrls = [ordered]@{}
-			Get-ChapterUrls -url "$bookUrl/zh" -chapterUrls $chapterUrls
-			$result = Get-ChapterTexts $chapterUrls "ctext"
-
-			$pinyinOutput = foreach ($url in $result.Keys) { 
-				$outputFormat = New-Object pinyin4net.Format.HanyuPinyinOutputFormat
-				$outputFormat.ToneType = [pinyin4net.Format.HanyuPinyinToneType]::WITH_TONE_MARK
-				$outputFormat.VCharType = [pinyin4net.Format.HanyuPinyinVCharType]::WITH_U_UNICODE
-				
-				foreach($ch in $result[$url].ToCharArray())
-				{
-					$pinyin = [pinyin4net.PinyinHelper]::ToHanyuPinyinStringArray($ch, $outputFormat)
-
-					#Write-Host $pinyin
-					Write-Output $pinyin 
+		foreach ($url in $text.Keys) { 
+			foreach($line in $text[$url]) {
+				if($Display) {
+					Write-Host $line
 				}
+				
+				if($OutputFile) {
+					$line | Out-File -Append $OutputFile
+				}
+				
+				$result += $line
 			}
 		}
 		
-		if($IncludeEnglishCText) {
-			$chapterUrls = [ordered]@{}
-			Get-ChapterUrls -url $bookUrl -chapterUrls $chapterUrls "etext"
-			$result = Get-ChapterTexts  $chapterUrls
-
-			$englishCTextOutput = foreach ($url in $result.Keys) { Write-Output $result[$url] }
-		}
-		
-		if($IncludeEnglishDeepL) {
-			$chapterUrls = [ordered]@{}
-			Get-ChapterUrls -url "$bookUrl/zh" -chapterUrls $chapterUrls
-			$result = Get-ChapterTexts  $chapterUrls "ctext"
-
-			$englishDeepLOutput = foreach ($url in $result.Keys) { Write-Output $result[$url] }
-		}
-		
-		($hanziOutput + $pinyinOutput + $englishCTextOutput + $englishDeepLOutput) | Out-File $OutputFile
+		$result
 	}
 	catch [System.Exception]
 	{
