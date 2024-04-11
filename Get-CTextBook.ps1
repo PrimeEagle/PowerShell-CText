@@ -64,7 +64,7 @@ Begin
 	if($cmd.Count -gt 1) { Write-DisplayHelp -Name "$(Get-RootScriptPath)" -HelpDetail }
 	if($cmd.Count -eq 1) { Write-DisplayHelp -Name "$(Get-RootScriptPath)" @cmd }
 	
-	Add-NuGetType -PackageName "HtmlAgilityPack"
+	Add-NuGetType -PackageName "HtmlAgilityPack" -Subdirectory "netstandard2.0"
 }
 
 Process
@@ -96,7 +96,7 @@ Process
 						if (-not $chapterUrls.Contains($fullUrl.AbsoluteUri)) {
 							$chapterTopLevel = Get-TopLevelFolder $fullUrl.AbsoluteUri
 							if ($chapterTopLevel -eq $bookTopLevel) {
-								$chapterUrls[$fullUrl.AbsoluteUri] = ""
+								$chapterUrls[$fullUrl.AbsoluteUri] = @()
 								Get-ChapterUrls -url $fullUrl.AbsoluteUri -chapterUrls $chapterUrls
 							}
 						}
@@ -111,24 +111,25 @@ Process
 				[string] $textClass
 			)
 			
-			$tempChapterUrls = [ordered]@{}
+			$resultData = @()
 			foreach ($cu in $chapterUrls.Keys) {
 				$result = Invoke-WebRequest -Uri $cu -AllowInsecureRedirect
 				$htmlDoc = New-Object HtmlAgilityPack.HtmlDocument
 				$htmlDoc.LoadHtml($result.Content)
-				$tempChapterUrls[$cu] = @()
 				
 				$tdNodes = $htmlDoc.DocumentNode.SelectNodes("//td[contains(concat(' ', normalize-space(@class), ' '), ' $textClass ')]")
-
+				
 				foreach ($td in $tdNodes) {
-					$tempLine = ($td.InnerText -replace '\s+', ' ').Trim()
-					if (-Not [string]::IsNullOrWhiteSpace($tempLine)) {
-						$tempChapterUrls[$cu] += $tempLine
+					$line = ($td.InnerText -replace '\s+', ' ').Trim()
+					
+					if (-Not [string]::IsNullOrWhiteSpace($line)) {
+						$lineArray = $line.ToCharArray()
+						$resultData += ,($lineArray)
 					}
 				}
 			}
 			
-			return $tempChapterUrls
+			return $resultData
 		}
 		
 		function Get-TopLevelFolder {
@@ -150,28 +151,27 @@ Process
 		$bookTopLevel = Get-TopLevelFolder $bookUrl
 		$chapterUrls = [ordered]@{}
 		Get-ChapterUrls -url "$bookUrl/zh" -chapterUrls $chapterUrls
-		$text = Get-ChapterTexts  $chapterUrls "ctext"
-		$result = @()
+		$text = Get-ChapterTexts $chapterUrls "ctext"
 		
 		if(Test-Path -Path $OutputFile) {
 			Remove-Item $OutputFile -Force
 		}
-		
-		foreach ($url in $text.Keys) { 
-			foreach($line in $text[$url]) {
-				if($Display) {
-					Write-Host $line
-				}
-				
-				if($OutputFile) {
-					$line | Out-File -Append $OutputFile
-				}
-				
-				$result += $line
+			
+		foreach($lineArray in $text) {
+			$outLine = [string]::Join("", $lineArray)
+
+			if($Display) {
+				Write-Host $outLine
+			}
+			
+			if($OutputFile) {
+				$outLine | Out-File -Append $OutputFile
 			}
 		}
-		
-		$result
+
+		if ($PSCmdlet.MyInvocation.PipelinePosition -ne $PSCmdlet.MyInvocation.PipelineLength) {
+            ,($text)
+        }
 	}
 	catch [System.Exception]
 	{
