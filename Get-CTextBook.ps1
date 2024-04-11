@@ -107,26 +107,69 @@ Process
 		
 		function Get-ChapterTexts {
 			param(
-				[System.Collections.Specialized.OrderedDictionary]$chapterUrls,
-				[string] $textClass
+				[Parameter()]		[System.Collections.Specialized.OrderedDictionary]$ChapterUrls,
+				[Parameter()]		[string] $ChineseClass,
+				[Parameter()]		[string] $EnglishClass
 			)
-			
-			$resultData = @()
-			foreach ($cu in $chapterUrls.Keys) {
-				$result = Invoke-WebRequest -Uri $cu -AllowInsecureRedirect
+				
+			$resultDataChinese = @()
+			$resultDataEnglish = @()
+						
+			foreach ($cu in $ChapterUrls.Keys) {
+				if($cu.EndsWith("/zh"))
+				{
+					$url = $cu.Substring(0, $cu.Length - 3)
+				}
+				else
+				{
+					$url = $cu
+				}
+				
+				$result = Invoke-WebRequest -Uri $url -AllowInsecureRedirect
 				$htmlDoc = New-Object HtmlAgilityPack.HtmlDocument
 				$htmlDoc.LoadHtml($result.Content)
 				
-				$tdNodes = $htmlDoc.DocumentNode.SelectNodes("//td[contains(concat(' ', normalize-space(@class), ' '), ' $textClass ')]")
+				$tdNodesChinese = $htmlDoc.DocumentNode.SelectNodes("//div[@class = 'text']//td[contains(concat(' ', normalize-space(@class), ' '), ' $chineseClass ')]")
 				
-				foreach ($td in $tdNodes) {
+				foreach ($td in $tdNodesChinese) {
 					$line = ($td.InnerText -replace '\s+', ' ').Trim()
 					
 					if (-Not [string]::IsNullOrWhiteSpace($line)) {
 						$lineArray = $line.ToCharArray()
-						$resultData += ,($lineArray)
+						$resultDataChinese += ,($lineArray)
 					}
 				}
+				
+				$tdNodesEnglish = $htmlDoc.DocumentNode.SelectNodes("//div[@class = 'text']//td[@class = '$englishClass']")
+				foreach ($td in $tdNodesEnglish) {
+					$tempDoc = New-Object HtmlAgilityPack.HtmlDocument
+					$tempDoc.LoadHtml($td.InnerHtml)
+
+					$unwantedNodes = $tempDoc.DocumentNode.SelectNodes(".//span | .//a | .//p")
+					if ($unwantedNodes -ne $null) {
+						foreach ($node in $unwantedNodes) {
+							$node.ParentNode.RemoveChild($node, $false)
+						}
+					}
+					$htmlString = $tempDoc.DocumentNode.InnerHtml
+					$lines = $htmlString -split '<br\s*/?>'
+
+					foreach ($line in $lines) {
+						$lineDoc = New-Object HtmlAgilityPack.HtmlDocument
+						$lineDoc.LoadHtml($line)
+						
+						$cleanText = $lineDoc.DocumentNode.InnerText.Trim()
+
+						if (-Not [string]::IsNullOrWhiteSpace($cleanText)) {
+							$resultDataEnglish += $cleanText
+						}
+					}
+				}
+			}
+			
+			$resultData = [PSCustomObject]@{
+				Chinese = $resultDataChinese
+				English = $resultDataEnglish
 			}
 			
 			return $resultData
@@ -151,13 +194,13 @@ Process
 		$bookTopLevel = Get-TopLevelFolder $bookUrl
 		$chapterUrls = [ordered]@{}
 		Get-ChapterUrls -url "$bookUrl/zh" -chapterUrls $chapterUrls
-		$text = Get-ChapterTexts $chapterUrls "ctext"
+		$text = Get-ChapterTexts -ChapterUrls $chapterUrls -ChineseClass "ctext" -EnglishClass "etext"
 		
 		if(Test-Path -Path $OutputFile) {
 			Remove-Item $OutputFile -Force
 		}
 			
-		foreach($lineArray in $text) {
+		foreach($lineArray in $text.Chinese) {
 			$outLine = [string]::Join("", $lineArray)
 
 			if($Display) {
@@ -166,6 +209,16 @@ Process
 			
 			if($OutputFile) {
 				$outLine | Out-File -Append $OutputFile
+			}
+		}
+		
+		foreach($line in $text.English) {
+			if($Display) {
+				Write-Host $line
+			}
+			
+			if($OutputFile) {
+				$line | Out-File -Append $OutputFile
 			}
 		}
 

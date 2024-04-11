@@ -56,7 +56,7 @@ using module Varan.PowerShell.PerformanceTimer
 using module Varan.PowerShell.Summary
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Low')]
-param (	[Parameter(Mandatory, ValueFromPipeline)] 				[array]     $ChineseText,
+param (	[Parameter(Mandatory, ValueFromPipeline)] 				[array]     $Text,
 		[Parameter()]											[string]    $OutputFile,
 		[Parameter()]											[switch]    $Display,
 		[Parameter()]											[switch]    $PinyinAboveHanzi,
@@ -113,7 +113,7 @@ Process
 			$outputFormat.ToneType = [pinyin4net.Format.HanyuPinyinToneType]::WITH_TONE_MARK
 			$outputFormat.VCharType = [pinyin4net.Format.HanyuPinyinVCharType]::WITH_U_UNICODE
 
-			foreach ($line in $ChineseText) {
+			foreach ($line in $Text.Chinese) {
 				$tempLine = [string]::Join("", $line)
 				$pinyinLine = @()
 				
